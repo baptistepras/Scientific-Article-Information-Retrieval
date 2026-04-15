@@ -78,7 +78,7 @@ Fuses two complementary retrieval signals using a weighted normalized sum:
 - **BM25 (lexical):** BM25Okapi index on title + abstract.
 - **BGE-large (semantic):** `BAAI/bge-large-en-v1.5` (1024 dimensions), a much more powerful bi-encoder than MiniLM.
 
-**Formula:** `final_score = α × BGE_normalized + (1 − α) × BM25_normalized`
+**Formula:** `final_score = α × BGE_normalized + (1 - α) × BM25_normalized`
 
 Each score is min-max normalized to [0, 1]. A grid search over α (0.05 to 0.95, step 0.05) finds the optimal weight → **α = 0.85** (BGE strongly dominates).
 
