@@ -18,23 +18,18 @@ Usage:
 
 import argparse
 import json
-import pickle
-import re
 from pathlib import Path
+from typing import Any
 
 import numpy as np
-from rank_bm25 import BM25Okapi
 from tqdm import tqdm
 
-from utils import (evaluate, format_text, get_device, load_corpus,
-                   load_embeddings, load_qrels, load_queries, save_submission)
+from utils import (DEFAULT_CORPUS, DEFAULT_HELD_OUT, DEFAULT_QRELS,
+                   DEFAULT_QUERIES, SCRIPT_DIR, build_bm25, evaluate,
+                   format_text, get_device, load_bm25, load_corpus,
+                   load_embeddings, load_qrels, load_queries, normalize_minmax,
+                   save_submission, tokenize)
 
-SCRIPT_DIR = Path(__file__).parent
-DATA_DIR = SCRIPT_DIR / "data"
-DEFAULT_QUERIES = DATA_DIR / "queries.parquet"
-DEFAULT_CORPUS = DATA_DIR / "corpus.parquet"
-DEFAULT_QRELS = DATA_DIR / "qrels.json"
-DEFAULT_HELD_OUT = SCRIPT_DIR / "held_out_queries.parquet"
 DEFAULT_BM25_DIR = SCRIPT_DIR / "models" / "bm25"
 DEFAULT_BGE_DIR = SCRIPT_DIR / "models" / "bge"
 DEFAULT_OUTPUT = SCRIPT_DIR / "submissions" / "score_fusion"
@@ -45,57 +40,8 @@ DEFAULT_ALPHA = 0.85   # weight for BGE; (1-alpha) for BM25
 # BGE retrieval models use this prefix for queries (not corpus docs)
 QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
 
-_STOPWORDS = None
 
-
-def get_stopwords():
-    global _STOPWORDS
-    if _STOPWORDS is None:
-        try:
-            from nltk.corpus import stopwords
-            _STOPWORDS = set(stopwords.words("english"))
-        except LookupError:
-            import nltk
-            nltk.download("stopwords", quiet=True)
-            from nltk.corpus import stopwords
-            _STOPWORDS = set(stopwords.words("english"))
-    return _STOPWORDS
-
-
-def tokenize(text: str) -> list:
-    text = re.sub(r"[^\w\s]", " ", text.lower())
-    tokens = text.split()
-    sw = get_stopwords()
-    return [t for t in tokens if t not in sw]
-
-
-def load_bm25(model_dir):
-    with open(model_dir / "index.pkl", "rb") as f:
-        bm25 = pickle.load(f)
-    print(f"Loaded BM25 index from {model_dir / 'index.pkl'}")
-    return bm25
-
-
-def build_bm25(corpus_texts, model_dir):
-    print("Tokenizing corpus (clean_nostop)...")
-    tokenized = [tokenize(t) for t in tqdm(corpus_texts)]
-    bm25 = BM25Okapi(tokenized, k1=1.0, b=1.0)
-    model_dir.mkdir(parents=True, exist_ok=True)
-    with open(model_dir / "index.pkl", "wb") as f:
-        pickle.dump(bm25, f)
-    print(f"BM25 index saved → {model_dir / 'index.pkl'}")
-    return bm25
-
-
-def normalize_minmax(arr: np.ndarray) -> np.ndarray:
-    """Normalize a 1D array to [0, 1] using min-max scaling."""
-    mn, mx = arr.min(), arr.max()
-    if mx - mn < 1e-10:
-        return np.zeros_like(arr)
-    return (arr - mn) / (mx - mn)
-
-
-def encode_queries_bge(model, texts, batch_size):
+def encode_queries_bge(model: Any, texts: list[str], batch_size: int) -> np.ndarray:
     prefixed = [QUERY_INSTRUCTION + t for t in texts]
     return model.encode(
         prefixed,
@@ -106,7 +52,7 @@ def encode_queries_bge(model, texts, batch_size):
     ).astype(np.float32)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="BGE + BM25 score-level fusion"
     )
@@ -159,7 +105,7 @@ def main():
     bge_q_emb_path = bge_dir / "query_embeddings.npy"
     bge_q_ids_path = bge_dir / "query_ids.json"
 
-    # ── Load / encode queries ────────────────────────────────────
+    # Load / encode queries
     if args.submit_held_out:
         print("Loading held-out queries...")
         queries = load_queries(args.held_out)
@@ -196,7 +142,7 @@ def main():
                 json.dump(query_ids, f)
             print(f"  BGE queries: {bge_query_embs.shape} → saved")
 
-    # ── Similarity matrix ────────────────────────────────────────
+    # Similarity matrix
     print("Computing BGE similarity matrix...")
     bge_sim = bge_query_embs @ bge_corpus_embs.T   # (n_queries, n_docs)
 
@@ -205,7 +151,7 @@ def main():
     for i, qtext in enumerate(tqdm(query_texts, desc="BM25")):
         bm25_matrix[i] = np.array(bm25.get_scores(tokenize(qtext)), dtype=np.float32)
 
-    # ── Held-out submission ──────────────────────────────────────
+    # Held-out submission
     if args.submit_held_out:
         alpha = args.alpha
         print(f"Score fusion: {alpha:.2f} * BGE + {1 - alpha:.2f} * BM25")
@@ -217,7 +163,7 @@ def main():
         save_submission(predictions, args.output)
         return
 
-    # ── Training eval ────────────────────────────────────────────
+    # Training eval
     qrels = load_qrels(args.qrels)
     query_domains = dict(zip(queries["doc_id"], queries["domain"]))
 
@@ -234,7 +180,7 @@ def main():
         save_submission(predictions, args.output)
         return
 
-    # ── Grid search over alpha ───────────────────────────────────
+    # Grid search over alpha
     print("\nGrid searching alpha (BGE weight)...")
     alpha_values = [round(a * 0.05, 2) for a in range(1, 20)]  # 0.05 to 0.95 step 0.05
 

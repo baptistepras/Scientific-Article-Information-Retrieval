@@ -14,22 +14,17 @@ from pathlib import Path
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from utils import (evaluate, format_text, load_corpus, load_embeddings,
-                   load_qrels, load_queries, save_submission)
+from utils import (DATA_DIR, DEFAULT_CORPUS, DEFAULT_HELD_OUT, DEFAULT_QRELS,
+                   DEFAULT_QUERIES, SCRIPT_DIR, evaluate, format_text,
+                   load_embeddings, load_qrels, load_queries, save_submission)
 
-SCRIPT_DIR = Path(__file__).parent
-DATA_DIR = SCRIPT_DIR / "data"
-DEFAULT_QUERIES = DATA_DIR / "queries.parquet"
-DEFAULT_CORPUS = DATA_DIR / "corpus.parquet"
-DEFAULT_QRELS = DATA_DIR / "qrels.json"
-DEFAULT_HELD_OUT = SCRIPT_DIR / "held_out_queries.parquet"
 DEFAULT_EMB_DIR = DATA_DIR / "embeddings" / "sentence-transformers_all-MiniLM-L6-v2"
 DEFAULT_OUTPUT = SCRIPT_DIR / "submissions" / "dense_baseline"
 
 MINILM_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Dense baseline retrieval with pre-computed MiniLM embeddings")
     parser.add_argument("--queries", default=DEFAULT_QUERIES)
     parser.add_argument("--corpus", default=DEFAULT_CORPUS)

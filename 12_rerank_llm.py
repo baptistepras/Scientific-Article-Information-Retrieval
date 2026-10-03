@@ -29,15 +29,11 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from utils import (evaluate, format_text, get_device, load_corpus,
-                   load_qrels, load_queries, save_submission)
+from utils import (DEFAULT_CORPUS, DEFAULT_HELD_OUT, DEFAULT_QRELS,
+                   DEFAULT_QUERIES, SCRIPT_DIR, evaluate, format_text,
+                   get_device, load_corpus, load_qrels, load_queries,
+                   normalize_minmax, save_submission)
 
-SCRIPT_DIR = Path(__file__).parent
-DATA_DIR = SCRIPT_DIR / "data"
-DEFAULT_QUERIES = DATA_DIR / "queries.parquet"
-DEFAULT_CORPUS = DATA_DIR / "corpus.parquet"
-DEFAULT_QRELS = DATA_DIR / "qrels.json"
-DEFAULT_HELD_OUT = SCRIPT_DIR / "held_out_queries.parquet"
 
 DEFAULT_LTR_SUB = SCRIPT_DIR / "submissions" / "ltr_ce" / "submission_data.json"
 DEFAULT_OUTPUT = SCRIPT_DIR / "submissions" / "rerank_llm_on_ltr"
@@ -77,17 +73,9 @@ def parse_score_from_text(text: str) -> float | None:
     return float(m.group(1))
 
 
-def normalize_minmax(arr: np.ndarray) -> np.ndarray:
-    mn, mx = float(arr.min()), float(arr.max())
-    if mx - mn < 1e-10:
-        return np.zeros_like(arr)
-    return (arr - mn) / (mx - mn)
-
-
-# ── Local HF backend ──────────────────────────────────────────────────────
-
+# Local HF backend
 class LocalLLM:
-    def __init__(self, model_name: str, device: str):
+    def __init__(self, model_name: str, device: str) -> None:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -138,10 +126,9 @@ class LocalLLM:
         return scores
 
 
-# ── OpenAI backend ────────────────────────────────────────────────────────
-
+# OpenAI backend
 class OpenAILLM:
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str) -> None:
         from openai import OpenAI
         if not os.getenv("OPENAI_API_KEY"):
             raise RuntimeError("OPENAI_API_KEY not set")
@@ -166,7 +153,7 @@ class OpenAILLM:
         return scores
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="LLM pointwise reranker on top of LTR+CE predictions"
     )

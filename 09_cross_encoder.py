@@ -23,21 +23,15 @@ Usage:
 """
 
 import argparse
-import json
-import pickle
-import re
 from pathlib import Path
 
 import numpy as np
-from utils import (evaluate, format_text, get_device, load_corpus,
-                   load_embeddings, load_qrels, load_queries, save_submission)
+import pandas as pd
+from utils import (DEFAULT_CORPUS, DEFAULT_HELD_OUT, DEFAULT_QRELS,
+                   DEFAULT_QUERIES, SCRIPT_DIR, compute_base_fusion, evaluate,
+                   extract_citation_sentences, format_text, get_device,
+                   load_corpus, load_qrels, load_queries, save_submission)
 
-SCRIPT_DIR = Path(__file__).parent
-DATA_DIR = SCRIPT_DIR / "data"
-DEFAULT_QUERIES = DATA_DIR / "queries.parquet"
-DEFAULT_CORPUS = DATA_DIR / "corpus.parquet"
-DEFAULT_QRELS = DATA_DIR / "qrels.json"
-DEFAULT_HELD_OUT = SCRIPT_DIR / "held_out_queries.parquet"
 DEFAULT_OUTPUT = SCRIPT_DIR / "submissions" / "crossencoder_v2"
 DEFAULT_CE_DIR = SCRIPT_DIR / "models" / "crossencoder_v2"
 DEFAULT_CROSS_ENCODER = "BAAI/bge-reranker-v2-m3"
@@ -45,56 +39,10 @@ DEFAULT_BATCH_SIZE = 64
 DEFAULT_BATCH_SIZE_CE = 32
 DEFAULT_RERANK_TOP = 100
 
-# Base fusion weights (from 06_multi_fusion.py)
-FUSION_MODELS = {
-    "uae": {
-        "safe_name": "WhereIsAI_UAE-Large-V1",
-        "model_name": "WhereIsAI/UAE-Large-V1",
-        "query_prefix": "",
-        "weight": 0.60,
-    },
-    "bge": {
-        "safe_name": "bge",
-        "model_name": "BAAI/bge-large-en-v1.5",
-        "query_prefix": "Represent this sentence for searching relevant passages: ",
-        "weight": 0.10,
-    },
-    "e5": {
-        "safe_name": "intfloat_e5-large-v2",
-        "model_name": "intfloat/e5-large-v2",
-        "query_prefix": "query: ",
-        "weight": 0.10,
-    },
-}
-TFIDF_WEIGHT = 0.20
 
-# ── Citation context extraction (same as 07_citation_context.py) ───────────────────────
+# Citation context extraction
 
-CITE_PATTERNS = [
-    re.compile(r'\[[\d,;\s\-]+\]'),
-    re.compile(r'\([A-Z][a-z]+(?:\s+et\s+al\.?)?,?\s*\d{4}[a-z]?\)'),
-    re.compile(r'\([A-Z][a-z]+\s+and\s+[A-Z][a-z]+,?\s*\d{4}\)'),
-    re.compile(r'\([A-Z][a-z]+\s+&\s+[A-Z][a-z]+,?\s*\d{4}\)'),
-]
-
-
-def extract_citation_sentences(full_text: str) -> str:
-    if not full_text:
-        return ""
-    sentences = re.split(r'(?<=[.!?])\s+', full_text)
-    cite_sents = []
-    for sent in sentences:
-        if any(p.search(sent) for p in CITE_PATTERNS):
-            cleaned = sent
-            for p in CITE_PATTERNS:
-                cleaned = p.sub('', cleaned)
-            cleaned = cleaned.strip()
-            if len(cleaned) > 20:
-                cite_sents.append(cleaned)
-    return " ".join(cite_sents)
-
-
-def build_enriched_query(row, max_ctx_chars: int = 1000) -> str:
+def build_enriched_query(row: pd.Series, max_ctx_chars: int = 1000) -> str:
     """Title + abstract + citation context sentences (truncated)."""
     ta = format_text(row)
     ctx = extract_citation_sentences(str(row.get("full_text", "")))
@@ -103,91 +51,9 @@ def build_enriched_query(row, max_ctx_chars: int = 1000) -> str:
     return ta
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────
+# Main
 
-def normalize_rows(matrix: np.ndarray) -> np.ndarray:
-    mins = matrix.min(axis=1, keepdims=True)
-    maxs = matrix.max(axis=1, keepdims=True)
-    denom = np.where(maxs - mins < 1e-10, 1.0, maxs - mins)
-    return np.where(maxs - mins < 1e-10, 0.0, (matrix - mins) / denom)
-
-
-# ── Base fusion loaders ───────────────────────────────────────────────────
-
-def load_dense_scores(safe_name, model_name, query_prefix, query_ids, query_texts,
-                      is_heldout, device, batch_size):
-    from sentence_transformers import SentenceTransformer
-    model_dir = SCRIPT_DIR / "models" / safe_name
-    corpus_embs, _ = load_embeddings(
-        model_dir / "corpus_embeddings.npy", model_dir / "corpus_ids.json"
-    )
-    q_emb_path = model_dir / "query_embeddings.npy"
-    q_ids_path = model_dir / "query_ids.json"
-
-    if not is_heldout and q_emb_path.exists():
-        q_embs, _ = load_embeddings(q_emb_path, q_ids_path)
-    else:
-        print(f"    Encoding queries with {model_name}...")
-        model = SentenceTransformer(model_name, device=device)
-        texts = [query_prefix + t for t in query_texts] if query_prefix else query_texts
-        q_embs = model.encode(
-            texts, batch_size=batch_size, show_progress_bar=True,
-            normalize_embeddings=True, convert_to_numpy=True,
-        ).astype(np.float32)
-        del model
-        if not is_heldout:
-            np.save(q_emb_path, q_embs)
-            with open(q_ids_path, "w") as f:
-                json.dump(query_ids, f)
-    return q_embs @ corpus_embs.T
-
-
-def load_tfidf_scores(query_texts, corpus_texts, is_heldout):
-    tfidf_dir = SCRIPT_DIR / "models" / "tfidf"
-    cache_path = tfidf_dir / ("heldout_scores.npy" if is_heldout else "train_scores.npy")
-    vect_path = tfidf_dir / "vectorizer.pkl"
-
-    if not is_heldout and cache_path.exists():
-        return np.load(cache_path).astype(np.float32)
-
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    if vect_path.exists():
-        with open(vect_path, "rb") as f:
-            vect = pickle.load(f)
-        corpus_vecs = vect.transform(corpus_texts)
-    else:
-        vect = TfidfVectorizer(max_features=100_000, sublinear_tf=True)
-        corpus_vecs = vect.fit_transform(corpus_texts)
-        if not is_heldout:
-            tfidf_dir.mkdir(parents=True, exist_ok=True)
-            with open(vect_path, "wb") as f:
-                pickle.dump(vect, f)
-    query_vecs = vect.transform(query_texts)
-    matrix = (query_vecs @ corpus_vecs.T).toarray().astype(np.float32)
-    if not is_heldout:
-        np.save(cache_path, matrix)
-    return matrix
-
-
-def compute_base_fusion(query_ids, query_texts, corpus_texts, is_heldout, device, batch_size):
-    fused = None
-    for key, cfg in FUSION_MODELS.items():
-        print(f"  [{key}] loading scores...")
-        raw = load_dense_scores(
-            cfg["safe_name"], cfg["model_name"], cfg["query_prefix"],
-            query_ids, query_texts, is_heldout, device, batch_size,
-        )
-        normed = normalize_rows(raw) * cfg["weight"]
-        fused = normed if fused is None else fused + normed
-    print("  [tfidf] loading scores...")
-    tfidf_raw = load_tfidf_scores(query_texts, corpus_texts, is_heldout)
-    fused += TFIDF_WEIGHT * normalize_rows(tfidf_raw)
-    return fused
-
-
-# ── Main ───────────────────────────────────────────────────────────────────
-
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Enhanced cross-encoder reranking with citation-context queries"
     )
@@ -216,7 +82,7 @@ def main():
     print(f"Cross-encoder: {args.cross_encoder}")
     print(f"Rerank top-{args.rerank_top}")
 
-    # ── Load corpus ────────────────────────────────────────────────────────
+    # Load corpus
     print("\nLoading corpus...")
     corpus = load_corpus(args.corpus)
     corpus_ids = corpus["doc_id"].tolist()
@@ -224,7 +90,7 @@ def main():
     corpus_id_to_idx = {cid: i for i, cid in enumerate(corpus_ids)}
     print(f"  {len(corpus)} docs")
 
-    # ── Load queries ───────────────────────────────────────────────────────
+    # Load queries
     is_heldout = args.submit_held_out
     queries = load_queries(args.held_out if is_heldout else args.queries)
     query_ids = queries["doc_id"].tolist()
@@ -237,13 +103,13 @@ def main():
     n_enriched = sum(1 for eq, ta in zip(enriched_queries, query_ta_texts) if len(eq) > len(ta))
     print(f"  {n_enriched}/{len(queries)} queries enriched with citation contexts")
 
-    # ── Base fusion ────────────────────────────────────────────────────────
+    # Base fusion
     print("\nLoading base fusion scores...")
     fusion_scores = compute_base_fusion(
         query_ids, query_ta_texts, corpus_ta_texts, is_heldout, device, args.batch_size
     )
 
-    # ── Cross-encoder scoring ──────────────────────────────────────────────
+    # Cross-encoder scoring
     suffix = "_heldout" if is_heldout else "_train"
     ce_cache = ce_dir / f"ce_scores{suffix}.npy"
 
@@ -284,11 +150,11 @@ def main():
         )
         print(f"  Saved CE scores → {ce_dir / f'ce_data{suffix}.npz'}")
 
-    # ── Build full CE score matrix (sparse → dense for top-K only) ────────
+    # Build full CE score matrix (sparse → dense for top-K only)
     n_q = len(query_ids)
     n_docs = len(corpus_ids)
 
-    def rank_with_gamma(gamma: float):
+    def rank_with_gamma(gamma: float) -> dict[str, list[str]]:
         """Interpolate CE + fusion, return top-100 predictions."""
         predictions = {}
         for i, qid in enumerate(query_ids):
@@ -318,7 +184,7 @@ def main():
             predictions[qid] = ranked_ids
         return predictions
 
-    # ── Held-out submission ────────────────────────────────────────────────
+    # Held-out submission
     if is_heldout:
         gamma = args.gamma if args.gamma is not None else 0.60
         print(f"\nSubmitting with gamma={gamma}")
@@ -326,7 +192,7 @@ def main():
         save_submission(predictions, args.output)
         return
 
-    # ── Training evaluation ────────────────────────────────────────────────
+    # Training evaluation
     qrels = load_qrels(args.qrels)
     query_domains = dict(zip(queries["doc_id"], queries["domain"]))
 

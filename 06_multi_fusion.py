@@ -25,31 +25,26 @@ import argparse
 import itertools
 import json
 import pickle
-import re
 from pathlib import Path
+from collections.abc import Iterator
 
 import numpy as np
 from tqdm import tqdm
 
-from utils import (evaluate, format_text, get_device, load_corpus,
-                   load_embeddings, load_qrels, load_queries, save_submission)
+from utils import (DEFAULT_CORPUS, DEFAULT_HELD_OUT, DEFAULT_QRELS,
+                   DEFAULT_QUERIES, SCRIPT_DIR, evaluate, format_text,
+                   get_device, load_corpus, load_embeddings, load_qrels,
+                   load_queries, normalize_rows, save_submission, tokenize)
 
-SCRIPT_DIR = Path(__file__).parent
-DATA_DIR = SCRIPT_DIR / "data"
-DEFAULT_QUERIES = DATA_DIR / "queries.parquet"
-DEFAULT_CORPUS = DATA_DIR / "corpus.parquet"
-DEFAULT_QRELS = DATA_DIR / "qrels.json"
-DEFAULT_HELD_OUT = SCRIPT_DIR / "held_out_queries.parquet"
 DEFAULT_OUTPUT = SCRIPT_DIR / "submissions" / "combined_v2"
 DEFAULT_BATCH_SIZE = 64
 
-# ── Model pool ───────────────────────────────────────────────────────────────
+# Model pool
 # type="dense": needs model_name, safe_name (dir under models/), query_prefix,
 #               trust_remote_code (for special models like stella).
 # type="bm25" / "tfidf": no extra fields.
 # active=True: included in the grid search.
 # Activate gte/stella by uncommenting after running 04_dense_encoders.py for them.
-
 MODELS = {
     "uae": {
         "type": "dense",
@@ -77,7 +72,7 @@ MODELS = {
     },
     "bm25": {"type": "bm25", "active": True},
     "tfidf": {"type": "tfidf", "active": True},
-    # ── Uncomment after: python3 04_dense_encoders.py --model-name Alibaba-NLP/gte-large-en-v1.5
+    # Uncomment after: python3 04_dense_encoders.py --model-name Alibaba-NLP/gte-large-en-v1.5
     # "gte": {
     #     "type": "dense",
     #     "model_name": "Alibaba-NLP/gte-large-en-v1.5",
@@ -86,9 +81,9 @@ MODELS = {
     #     "trust_remote_code": False,
     #     "active": True,
     # },
-    # ── Uncomment after: python3 04_dense_encoders.py --model-name dunzhang/stella_en_1.5B_v5
-    # ── Note: stella requires trust_remote_code=True. Also add it to 04_dense_encoders.py:
-    # ──   model = SentenceTransformer(args.model_name, device=device, trust_remote_code=True)
+    # Uncomment after: python3 04_dense_encoders.py --model-name dunzhang/stella_en_1.5B_v5
+    # Note: stella requires trust_remote_code=True. Also add it to 04_dense_encoders.py:
+    #   model = SentenceTransformer(args.model_name, device=device, trust_remote_code=True)
     # "stella": {
     #     "type": "dense",
     #     "model_name": "dunzhang/stella_en_1.5B_v5",
@@ -99,39 +94,9 @@ MODELS = {
     # },
 }
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# Helpers
 
-_STOPWORDS = None
-
-
-def get_stopwords():
-    global _STOPWORDS
-    if _STOPWORDS is None:
-        try:
-            from nltk.corpus import stopwords
-            _STOPWORDS = set(stopwords.words("english"))
-        except LookupError:
-            import nltk
-            nltk.download("stopwords", quiet=True)
-            from nltk.corpus import stopwords
-            _STOPWORDS = set(stopwords.words("english"))
-    return _STOPWORDS
-
-
-def tokenize(text: str) -> list:
-    text = re.sub(r"[^\w\s]", " ", text.lower())
-    return [t for t in text.split() if t not in get_stopwords()]
-
-
-def normalize_rows(matrix: np.ndarray) -> np.ndarray:
-    """Min-max normalize each row (per-query) to [0, 1]."""
-    mins = matrix.min(axis=1, keepdims=True)
-    maxs = matrix.max(axis=1, keepdims=True)
-    denom = np.where(maxs - mins < 1e-10, 1.0, maxs - mins)
-    return np.where(maxs - mins < 1e-10, 0.0, (matrix - mins) / denom)
-
-
-def simplex_grid(n: int, total: int = 10, min_val: int = 1):
+def simplex_grid(n: int, total: int = 10, min_val: int = 1) -> Iterator[tuple[int, ...]]:
     """Yield all integer tuples of length n summing to total, each ≥ min_val."""
     if n == 1:
         if total >= min_val:
@@ -142,13 +107,13 @@ def simplex_grid(n: int, total: int = 10, min_val: int = 1):
             yield (first,) + rest
 
 
-def weight_combos(n: int, steps: int = 10):
+def weight_combos(n: int, steps: int = 10) -> Iterator[tuple[float, ...]]:
     """Yield weight tuples of length n summing to 1.0, step=1/steps, each ≥ 1/steps."""
     for ints in simplex_grid(n, steps, min_val=1):
         yield tuple(i / steps for i in ints)
 
 
-# ── Score matrix loaders ─────────────────────────────────────────────────────
+# Score matrix loaders
 
 def load_dense_scores(key: str, cfg: dict, query_ids: list, query_texts: list,
                       is_heldout: bool, device: str, batch_size: int) -> np.ndarray:
@@ -271,17 +236,17 @@ def get_scores(key: str, query_ids: list, query_texts: list, corpus_texts: list,
     return normalize_rows(raw)
 
 
-def fuse_and_rank(score_mats: list, weights: tuple,
-                  query_ids: list, corpus_ids: list) -> dict:
+def fuse_and_rank(score_mats: list, weights: tuple, query_ids: list,
+                  corpus_ids: list) -> dict:
     """Weighted sum of normalized matrices → top-100 predictions."""
     fused = sum(w * m for w, m in zip(weights, score_mats))
     top_idx = np.argsort(-fused, axis=1)[:, :100]
     return {qid: [corpus_ids[j] for j in top_idx[i]] for i, qid in enumerate(query_ids)}
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# Main
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Exhaustive multi-model score fusion — grid search or held-out submission"
     )
@@ -319,7 +284,7 @@ def main():
     corpus_texts = [format_text(row) for _, row in corpus.iterrows()]
     print(f"  {len(corpus)} docs")
 
-    # ── HELD-OUT SUBMISSION ──────────────────────────────────────────────────
+    # HELD-OUT SUBMISSION
     if args.submit_held_out:
         queries = load_queries(args.held_out)
         query_ids = queries["doc_id"].tolist()
@@ -337,7 +302,7 @@ def main():
         save_submission(predictions, args.output)
         return
 
-    # ── TRAINING GRID SEARCH ─────────────────────────────────────────────────
+    # TRAINING GRID SEARCH
     queries = load_queries(args.queries)
     query_ids = queries["doc_id"].tolist()
     query_texts = [format_text(row) for _, row in queries.iterrows()]
@@ -405,7 +370,7 @@ def main():
                     best_combo = combo
                     best_weights = weights
 
-    # ── Final report ─────────────────────────────────────────────────────────
+    # Final report
     print(f"\n{'=' * 60}")
     print(f"Grid search complete — {n_evals} combinations evaluated")
     print(f"{'=' * 60}")

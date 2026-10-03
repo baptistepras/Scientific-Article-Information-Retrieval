@@ -14,19 +14,16 @@ Usage:
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from tqdm import tqdm
 
-from utils import (evaluate, format_text, get_device, load_corpus,
-                   load_qrels, load_queries, save_submission)
+from utils import (DEFAULT_CORPUS, DEFAULT_HELD_OUT, DEFAULT_QRELS,
+                   DEFAULT_QUERIES, SCRIPT_DIR, evaluate, format_text,
+                   get_device, load_corpus, load_qrels, load_queries,
+                   normalize_minmax, save_submission)
 
-SCRIPT_DIR = Path(__file__).parent
-DATA_DIR = SCRIPT_DIR / "data"
-DEFAULT_QUERIES = DATA_DIR / "queries.parquet"
-DEFAULT_CORPUS = DATA_DIR / "corpus.parquet"
-DEFAULT_QRELS = DATA_DIR / "qrels.json"
-DEFAULT_HELD_OUT = SCRIPT_DIR / "held_out_queries.parquet"
 
 DEFAULT_LTR_SUB = SCRIPT_DIR / "submissions" / "ltr_ce" / "submission_data.json"
 DEFAULT_LTR_HELDOUT_SUB = SCRIPT_DIR / "submissions" / "ltr_ce" / "submission_data.json"
@@ -39,14 +36,8 @@ DEFAULT_GAMMA = 0.7
 DEFAULT_MAX_LENGTH = 512
 
 
-def normalize_minmax(arr: np.ndarray) -> np.ndarray:
-    mn, mx = float(arr.min()), float(arr.max())
-    if mx - mn < 1e-10:
-        return np.zeros_like(arr)
-    return (arr - mn) / (mx - mn)
-
-
-def rerank_query(ce_model, query_text, candidate_texts, batch_size, max_length):
+def rerank_query(ce_model: Any, query_text: str, candidate_texts: list[str],
+                 batch_size: int, max_length: int) -> np.ndarray:
     pairs = [[query_text, t] for t in candidate_texts]
     scores = ce_model.predict(
         pairs,
@@ -57,7 +48,7 @@ def rerank_query(ce_model, query_text, candidate_texts, batch_size, max_length):
     return np.asarray(scores, dtype=np.float32)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Cross-encoder rerank of LTR+CE predictions"
     )

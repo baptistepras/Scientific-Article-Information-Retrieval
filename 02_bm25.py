@@ -9,71 +9,23 @@ Usage:
 """
 
 import argparse
-import pickle
-import re
 from pathlib import Path
+from typing import Any
 
 import numpy as np
-from rank_bm25 import BM25Okapi
 from tqdm import tqdm
 
-from utils import (evaluate, format_text, load_corpus, load_qrels,
-                   load_queries, save_submission)
+from utils import (DEFAULT_CORPUS, DEFAULT_HELD_OUT, DEFAULT_QRELS,
+                   DEFAULT_QUERIES, SCRIPT_DIR, build_bm25, evaluate,
+                   format_text, load_bm25, load_corpus, load_qrels,
+                   load_queries, save_submission, tokenize)
 
-SCRIPT_DIR = Path(__file__).parent
-DATA_DIR = SCRIPT_DIR / "data"
-DEFAULT_QUERIES = DATA_DIR / "queries.parquet"
-DEFAULT_CORPUS = DATA_DIR / "corpus.parquet"
-DEFAULT_QRELS = DATA_DIR / "qrels.json"
-DEFAULT_HELD_OUT = SCRIPT_DIR / "held_out_queries.parquet"
 DEFAULT_MODEL_DIR = SCRIPT_DIR / "models" / "bm25"
 DEFAULT_OUTPUT = SCRIPT_DIR / "submissions" / "bm25"
 
-_STOPWORDS = None
 
-
-def get_stopwords():
-    global _STOPWORDS
-    if _STOPWORDS is None:
-        try:
-            from nltk.corpus import stopwords
-            _STOPWORDS = set(stopwords.words("english"))
-        except LookupError:
-            import nltk
-            nltk.download("stopwords", quiet=True)
-            from nltk.corpus import stopwords
-            _STOPWORDS = set(stopwords.words("english"))
-    return _STOPWORDS
-
-
-def tokenize(text: str) -> list:
-    # clean_nostop: remove punctuation + filter English stopwords (best from tuning)
-    text = re.sub(r"[^\w\s]", " ", text.lower())
-    tokens = text.split()
-    sw = get_stopwords()
-    return [t for t in tokens if t not in sw]
-
-
-def build_bm25(corpus_texts, model_dir):
-    print("Tokenizing corpus...")
-    tokenized = [tokenize(t) for t in tqdm(corpus_texts)]
-    print("Building BM25Okapi index...")
-    bm25 = BM25Okapi(tokenized, k1=1.0, b=1.0)
-    model_dir.mkdir(parents=True, exist_ok=True)
-    with open(model_dir / "index.pkl", "wb") as f:
-        pickle.dump(bm25, f)
-    print(f"BM25 index saved → {model_dir / 'index.pkl'}")
-    return bm25
-
-
-def load_bm25(model_dir):
-    with open(model_dir / "index.pkl", "rb") as f:
-        bm25 = pickle.load(f)
-    print(f"Loaded BM25 index from {model_dir / 'index.pkl'}")
-    return bm25
-
-
-def retrieve(bm25, query_texts, corpus_ids, top_k=100):
+def retrieve(bm25: Any, query_texts: list[str], corpus_ids: list[str],
+             top_k: int = 100) -> dict[int, list[str]]:
     predictions = {}
     for i, qtext in enumerate(tqdm(query_texts, desc="Retrieving")):
         tokens = tokenize(qtext)
@@ -84,7 +36,7 @@ def retrieve(bm25, query_texts, corpus_ids, top_k=100):
     return predictions
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="BM25 improved sparse retrieval")
     parser.add_argument("--queries", default=DEFAULT_QUERIES)
     parser.add_argument("--corpus", default=DEFAULT_CORPUS)

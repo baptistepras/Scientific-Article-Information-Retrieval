@@ -21,20 +21,15 @@ Usage:
 
 import argparse
 import json
-from pathlib import Path
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from utils import (evaluate, format_text, get_device, load_corpus,
-                   load_embeddings, load_qrels, load_queries, save_submission)
+from utils import (DEFAULT_CORPUS, DEFAULT_HELD_OUT, DEFAULT_QRELS,
+                   DEFAULT_QUERIES, SCRIPT_DIR, evaluate, format_text,
+                   get_device, load_corpus, load_embeddings, load_qrels,
+                   load_queries, save_submission)
 
-SCRIPT_DIR = Path(__file__).parent
-DATA_DIR = SCRIPT_DIR / "data"
-DEFAULT_QUERIES = DATA_DIR / "queries.parquet"
-DEFAULT_CORPUS = DATA_DIR / "corpus.parquet"
-DEFAULT_QRELS = DATA_DIR / "qrels.json"
-DEFAULT_HELD_OUT = SCRIPT_DIR / "held_out_queries.parquet"
 DEFAULT_MODEL_NAME = "WhereIsAI/UAE-Large-V1"
 DEFAULT_BATCH_SIZE = 64
 
@@ -43,7 +38,8 @@ def model_name_to_dir(model_name: str) -> str:
     return model_name.replace("/", "_")
 
 
-def encode_texts(model, texts, prefix, batch_size):
+def encode_texts(model: SentenceTransformer, texts: list[str], prefix: str,
+                 batch_size: int) -> np.ndarray:
     if prefix:
         texts = [prefix + t for t in texts]
     return model.encode(
@@ -55,7 +51,7 @@ def encode_texts(model, texts, prefix, batch_size):
     ).astype(np.float32)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Dense retrieval with configurable model and prefixes"
     )
@@ -98,7 +94,7 @@ def main():
     if args.corpus_prefix:
         print(f"Corpus prefix: {args.corpus_prefix!r}")
 
-    # ── Corpus embeddings ──────────────────────────────────────
+    # Corpus embeddings
     if not args.force_encode and corpus_emb_path.exists():
         print("Loading cached corpus embeddings...")
         corpus_embs, corpus_ids = load_embeddings(corpus_emb_path, corpus_ids_path)
@@ -120,7 +116,7 @@ def main():
             json.dump(corpus_ids, f)
         print(f"  corpus: {corpus_embs.shape} → saved")
 
-    # ── Query embeddings ───────────────────────────────────────
+    # Query embeddings
     if args.submit_held_out:
         print("Loading held-out queries...")
         queries = load_queries(args.held_out)
@@ -153,7 +149,7 @@ def main():
                 json.dump(query_ids, f)
             print(f"  queries: {query_embs.shape} → saved")
 
-    # ── Ranking ────────────────────────────────────────────────
+    # Ranking
     print("Ranking by dot product similarity...")
     sim_matrix = query_embs @ corpus_embs.T
     top_indices = np.argsort(-sim_matrix, axis=1)[:, :100]

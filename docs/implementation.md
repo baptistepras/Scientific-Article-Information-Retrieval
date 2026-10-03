@@ -59,5 +59,5 @@ This is the largest single gain (+0.08). Trees learn interactions that a sum can
 
 | File | Role |
 | --- | --- |
-| `utils.py` | Device selection, data loaders, text formatting, metrics, reciprocal rank fusion, and submission export (JSON and ZIP for Codabench). |
+| `utils.py` | Everything shared by several scripts: data paths, device selection, data loaders, text formatting, metrics, reciprocal rank fusion, submission export (JSON and ZIP for Codabench), the tokenizer, score normalization, the BM25 index, the cached score loaders, the base fusion of script 06, citation sentence extraction, and the learning to rank helpers. |
 | `01_tfidf.py` to `12_rerank_llm.py` | One step each, as described above. Each script evaluates on the training queries by default, and writes a Codabench submission with `--submit-held-out`. |

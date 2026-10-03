@@ -62,7 +62,7 @@ The dependencies between scripts and every command are in [docs/usage.md](docs/u
 
 ```
 01_tfidf.py to 12_rerank_llm.py   one script per step of the results table
-utils.py                          shared data loading, metrics, and submission export
+utils.py                          shared paths, loaders, retrieval helpers, metrics, and submission export
 docs/                             implementation and usage
 ```
 
@@ -80,7 +80,6 @@ docs/                             implementation and usage
 - L. Wang, N. Yang, X. Huang, B. Jiao, L. Yang, D. Jiang, R. Majumder, and F. Wei. Text embeddings by weakly-supervised contrastive pre-training. arXiv:2212.03533, 2022.
 - X. Li and J. Li. AnglE-optimized text embeddings. arXiv:2309.12871, 2023.
 - M. Ostendorff, N. Rethmeier, I. Augenstein, B. Gipp, and G. Rehm. Neighborhood contrastive learning for scientific document representations with citation embeddings. *EMNLP*, 2022.
-- J. Chen, S. Xiao, P. Zhang, K. Luo, D. Lian, and Z. Liu. BGE M3-Embedding: multi-lingual, multi-functionality, multi-granularity text embeddings through self-knowledge distillation. *Findings of ACL*, 2024.
 - T. Chen and C. Guestrin. XGBoost: a scalable tree boosting system. *KDD*, 2016.
 - C. J. C. Burges. From RankNet to LambdaRank to LambdaMART: an overview. Microsoft Research Technical Report, 2010.
 - Qwen Team. Qwen2.5 technical report. arXiv:2412.15115, 2024.

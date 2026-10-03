@@ -17,190 +17,29 @@ Usage:
 """
 
 import argparse
-import json
-import pickle
-import re
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 
-from utils import (evaluate, format_text, get_body_chunks, get_device,
-                   load_corpus, load_embeddings, load_qrels, load_queries,
-                   save_submission)
+from utils import (DEFAULT_CORPUS, DEFAULT_HELD_OUT, DEFAULT_QRELS,
+                   DEFAULT_QUERIES, DENSE_MODELS, SCRIPT_DIR, TOP_K_CANDIDATES,
+                   evaluate, fill_labels, format_text, get_device,
+                   load_bm25_fulltext_scores, load_bm25_ta_scores, load_corpus,
+                   load_dense_sim, load_qrels, load_queries, load_tfidf_scores,
+                   predict_rankings, save_submission)
 
-SCRIPT_DIR = Path(__file__).parent
-DATA_DIR = SCRIPT_DIR / "data"
-DEFAULT_QUERIES = DATA_DIR / "queries.parquet"
-DEFAULT_CORPUS = DATA_DIR / "corpus.parquet"
-DEFAULT_QRELS = DATA_DIR / "qrels.json"
-DEFAULT_HELD_OUT = SCRIPT_DIR / "held_out_queries.parquet"
 DEFAULT_OUTPUT = SCRIPT_DIR / "submissions" / "ltr_ce"
 DEFAULT_LTR_DIR = SCRIPT_DIR / "models" / "ltr_ce"
 DEFAULT_CE_DIR = SCRIPT_DIR / "models" / "crossencoder_v2"
 DEFAULT_BATCH_SIZE = 64
-TOP_K_CANDIDATES = 200
-
-DENSE_MODELS = {
-    "uae": {
-        "safe_name": "WhereIsAI_UAE-Large-V1",
-        "model_name": "WhereIsAI/UAE-Large-V1",
-        "query_prefix": "",
-    },
-    "bge": {
-        "safe_name": "bge",
-        "model_name": "BAAI/bge-large-en-v1.5",
-        "query_prefix": "Represent this sentence for searching relevant passages: ",
-    },
-    "e5": {
-        "safe_name": "intfloat_e5-large-v2",
-        "model_name": "intfloat/e5-large-v2",
-        "query_prefix": "query: ",
-    },
-    "scincl": {
-        "safe_name": "specter2",
-        "model_name": "malteos/scincl",
-        "query_prefix": "",
-    },
-}
-
-# ── Helpers ────────────────────────────────────────────────────────────────
-
-_STOPWORDS = None
 
 
-def get_stopwords():
-    global _STOPWORDS
-    if _STOPWORDS is None:
-        try:
-            from nltk.corpus import stopwords
-            _STOPWORDS = set(stopwords.words("english"))
-        except LookupError:
-            import nltk
-            nltk.download("stopwords", quiet=True)
-            from nltk.corpus import stopwords
-            _STOPWORDS = set(stopwords.words("english"))
-    return _STOPWORDS
+# Score matrix loaders
 
-
-def tokenize(text: str) -> list:
-    text = re.sub(r"[^\w\s]", " ", text.lower())
-    return [t for t in text.split() if t not in get_stopwords()]
-
-
-def normalize_rows(matrix: np.ndarray) -> np.ndarray:
-    mins = matrix.min(axis=1, keepdims=True)
-    maxs = matrix.max(axis=1, keepdims=True)
-    denom = np.where(maxs - mins < 1e-10, 1.0, maxs - mins)
-    return np.where(maxs - mins < 1e-10, 0.0, (matrix - mins) / denom)
-
-
-# ── Score matrix loaders ───────────────────────────────────────────────────
-
-def load_dense_sim(safe_name, model_name, query_prefix, query_ids, query_texts,
-                   is_heldout, device, batch_size):
-    from sentence_transformers import SentenceTransformer
-    model_dir = SCRIPT_DIR / "models" / safe_name
-    corpus_emb_path = model_dir / "corpus_embeddings.npy"
-    corpus_ids_path = model_dir / "corpus_ids.json"
-
-    if not corpus_emb_path.exists():
-        print(f"    [SKIP] {safe_name}: no corpus embeddings found")
-        return None
-
-    corpus_embs, _ = load_embeddings(corpus_emb_path, corpus_ids_path)
-    q_emb_path = model_dir / "query_embeddings.npy"
-    q_ids_path = model_dir / "query_ids.json"
-
-    if not is_heldout and q_emb_path.exists():
-        q_embs, _ = load_embeddings(q_emb_path, q_ids_path)
-    else:
-        print(f"    Encoding queries with {model_name}...")
-        model = SentenceTransformer(model_name, device=device)
-        texts = [query_prefix + t for t in query_texts] if query_prefix else query_texts
-        q_embs = model.encode(
-            texts, batch_size=batch_size, show_progress_bar=True,
-            normalize_embeddings=True, convert_to_numpy=True,
-        ).astype(np.float32)
-        del model
-        if not is_heldout:
-            np.save(q_emb_path, q_embs)
-            with open(q_ids_path, "w") as f:
-                json.dump(query_ids, f)
-    return q_embs @ corpus_embs.T
-
-
-def load_bm25_ta_scores(query_texts, is_heldout):
-    bm25_dir = SCRIPT_DIR / "models" / "bm25"
-    cache_path = bm25_dir / ("heldout_scores.npy" if is_heldout else "train_scores.npy")
-    if cache_path.exists():
-        return np.load(cache_path).astype(np.float32)
-
-    index_path = bm25_dir / "index.pkl"
-    if not index_path.exists():
-        print("    [SKIP] BM25 TA: no index found")
-        return None
-    with open(index_path, "rb") as f:
-        bm25 = pickle.load(f)
-    n_docs = bm25.corpus_size
-    matrix = np.zeros((len(query_texts), n_docs), dtype=np.float32)
-    for i, qt in enumerate(tqdm(query_texts, desc="BM25 TA", leave=False)):
-        matrix[i] = np.array(bm25.get_scores(tokenize(qt)), dtype=np.float32)
-    if not is_heldout:
-        np.save(cache_path, matrix)
-    return matrix
-
-
-def load_tfidf_scores(query_texts, corpus_texts, is_heldout):
-    tfidf_dir = SCRIPT_DIR / "models" / "tfidf"
-    cache_path = tfidf_dir / ("heldout_scores.npy" if is_heldout else "train_scores.npy")
-    if not is_heldout and cache_path.exists():
-        return np.load(cache_path).astype(np.float32)
-
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    vect_path = tfidf_dir / "vectorizer.pkl"
-    if vect_path.exists():
-        with open(vect_path, "rb") as f:
-            vect = pickle.load(f)
-        corpus_vecs = vect.transform(corpus_texts)
-    else:
-        vect = TfidfVectorizer(max_features=100_000, sublinear_tf=True)
-        corpus_vecs = vect.fit_transform(corpus_texts)
-        if not is_heldout:
-            tfidf_dir.mkdir(parents=True, exist_ok=True)
-            with open(vect_path, "wb") as f:
-                pickle.dump(vect, f)
-    query_vecs = vect.transform(query_texts)
-    matrix = (query_vecs @ corpus_vecs.T).toarray().astype(np.float32)
-    if not is_heldout:
-        np.save(cache_path, matrix)
-    return matrix
-
-
-def load_bm25_fulltext_scores(is_heldout):
-    ft_dir = SCRIPT_DIR / "models" / "bm25_fulltext"
-    suffix = "_heldout" if is_heldout else "_train"
-
-    cite_path = ft_dir / f"cite_ctx_scores{suffix}.npy"
-    ta_ft_path = ft_dir / f"ta_fulltext_scores{suffix}.npy"
-
-    cite_scores = None
-    ta_ft_scores = None
-
-    if cite_path.exists():
-        cite_scores = np.load(cite_path).astype(np.float32)
-    else:
-        print("    [SKIP] Citation-context BM25: run 07_citation_context.py first")
-
-    if ta_ft_path.exists():
-        ta_ft_scores = np.load(ta_ft_path).astype(np.float32)
-    else:
-        print("    [SKIP] TA full-text BM25: run 07_citation_context.py first")
-
-    return cite_scores, ta_ft_scores
-
-
-def load_ce_data(ce_dir: Path, is_heldout: bool):
+def load_ce_data(ce_dir: Path,
+                 is_heldout: bool) -> tuple[np.ndarray | None, np.ndarray | None]:
     """Load cached cross-encoder scores and indices."""
     suffix = "_heldout" if is_heldout else "_train"
     ce_data_path = ce_dir / f"ce_data{suffix}.npz"
@@ -213,11 +52,12 @@ def load_ce_data(ce_dir: Path, is_heldout: bool):
     return ce_data["scores"], ce_data["indices"]
 
 
-# ── Feature construction ──────────────────────────────────────────────────
+# Feature construction
 
 def build_features(score_matrices: dict, query_ids: list, corpus_ids: list,
-                   queries_df, corpus_df, ce_scores_sparse, ce_indices,
-                   n_candidates: int = TOP_K_CANDIDATES):
+                   queries_df: pd.DataFrame, corpus_df: pd.DataFrame,
+                   ce_scores_sparse: np.ndarray | None, ce_indices: np.ndarray | None,
+                   n_candidates: int = TOP_K_CANDIDATES) -> tuple[np.ndarray, np.ndarray, list[int], list[tuple[int, int]], list[str]]:
     """
     Build (query, doc) feature vectors for LTR, including CE features.
 
@@ -319,34 +159,9 @@ def build_features(score_matrices: dict, query_ids: list, corpus_ids: list,
     return features, labels_arr, groups, pair_info, feature_names
 
 
-def fill_labels(labels: np.ndarray, pair_info: list, query_ids: list,
-                corpus_ids: list, qrels: dict):
-    for idx, (qi, di) in enumerate(pair_info):
-        qid = query_ids[qi]
-        doc_id = corpus_ids[di]
-        if doc_id in set(qrels.get(qid, [])):
-            labels[idx] = 1.0
-    return labels
+# Main
 
-
-def predict_rankings(model, features, pair_info, query_ids, corpus_ids, groups):
-    scores = model.predict(features)
-    predictions = {}
-    offset = 0
-    for qi, g in enumerate(groups):
-        qid = query_ids[qi]
-        group_scores = scores[offset:offset + g]
-        group_pairs = pair_info[offset:offset + g]
-        sorted_local = np.argsort(-group_scores)
-        ranked_ids = [corpus_ids[group_pairs[j][1]] for j in sorted_local[:100]]
-        predictions[qid] = ranked_ids
-        offset += g
-    return predictions
-
-
-# ── Main ───────────────────────────────────────────────────────────────────
-
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="LTR with Cross-Encoder features (5-fold GroupKFold)"
     )
@@ -376,7 +191,7 @@ def main():
 
     print(f"Device: {device}")
 
-    # ── Load data ──────────────────────────────────────────────────────────
+    # Load data
     print("Loading corpus...")
     corpus = load_corpus(args.corpus)
     corpus_ids = corpus["doc_id"].tolist()
@@ -389,7 +204,7 @@ def main():
     query_ta_texts = [format_text(row) for _, row in queries.iterrows()]
     print(f"  {len(queries)} {'held-out' if is_heldout else 'training'} queries")
 
-    # ── Load all score matrices ────────────────────────────────────────────
+    # Load all score matrices
     print("\nLoading score matrices...")
     score_matrices = {}
 
@@ -416,7 +231,7 @@ def main():
     print(f"\nAvailable score matrices: {list(available.keys())}")
     print(f"Missing (will use 0): {[k for k, v in score_matrices.items() if v is None]}")
 
-    # ── Load cross-encoder scores ──────────────────────────────────────────
+    # Load cross-encoder scores
     print("\nLoading cross-encoder scores...")
     ce_scores_sparse, ce_indices = load_ce_data(args.ce_dir, is_heldout)
     if ce_scores_sparse is not None:
@@ -424,7 +239,7 @@ def main():
     else:
         print("  WARNING: No CE scores available. Running without CE features.")
 
-    # ── Build features ─────────────────────────────────────────────────────
+    # Build features
     feature_cache = ltr_dir / ("features_heldout.npz" if is_heldout else "features_train.npz")
 
     if not args.retrain and feature_cache.exists():
@@ -459,7 +274,7 @@ def main():
     if not is_heldout:
         print(f"  Positive pairs: {int(labels.sum())} ({100*labels.mean():.2f}%)")
 
-    # ── Held-out submission ────────────────────────────────────────────────
+    # Held-out submission
     if is_heldout:
         model_path = ltr_dir / "model.json"
         if not model_path.exists():
@@ -473,7 +288,7 @@ def main():
         save_submission(predictions, args.output)
         return
 
-    # ── Cross-validation ───────────────────────────────────────────────────
+    # Cross-validation
     qrels = load_qrels(args.qrels)
     if labels.sum() == 0:
         labels = fill_labels(labels, pair_info, query_ids, corpus_ids, qrels)
@@ -555,7 +370,7 @@ def main():
     print(f"CV NDCG@10: {mean_ndcg:.4f} +/- {std_ndcg:.4f}")
     print(f"{'=' * 60}")
 
-    # ── Train final model on all data ──────────────────────────────────────
+    # Train final model on all data
     print("\nTraining final model on all training data...")
     final_model = XGBRanker(
         objective="rank:ndcg",

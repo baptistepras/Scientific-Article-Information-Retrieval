@@ -9,28 +9,24 @@ Usage:
 """
 
 import argparse
-import os
 import pickle
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from utils import (evaluate, format_text, load_corpus, load_qrels,
-                   load_queries, save_submission)
+from utils import (DEFAULT_CORPUS, DEFAULT_HELD_OUT, DEFAULT_QRELS,
+                   DEFAULT_QUERIES, SCRIPT_DIR, evaluate, format_text,
+                   load_corpus, load_qrels, load_queries, save_submission)
 
-SCRIPT_DIR = Path(__file__).parent
-DATA_DIR = SCRIPT_DIR / "data"
-DEFAULT_QUERIES = DATA_DIR / "queries.parquet"
-DEFAULT_CORPUS = DATA_DIR / "corpus.parquet"
-DEFAULT_QRELS = DATA_DIR / "qrels.json"
-DEFAULT_HELD_OUT = SCRIPT_DIR / "held_out_queries.parquet"
 DEFAULT_MODEL_DIR = SCRIPT_DIR / "models" / "tfidf"
 DEFAULT_OUTPUT = SCRIPT_DIR / "submissions" / "tfidf"
 
 
-def build_vectorizer(corpus_texts, model_dir):
+def build_vectorizer(corpus_texts: list[str],
+                     model_dir: Path) -> tuple[TfidfVectorizer, Any]:
     print("Fitting TF-IDF vectorizer on corpus...")
     vectorizer = TfidfVectorizer(
         sublinear_tf=True,
@@ -47,14 +43,14 @@ def build_vectorizer(corpus_texts, model_dir):
     return vectorizer, corpus_matrix
 
 
-def load_vectorizer(model_dir):
+def load_vectorizer(model_dir: Path) -> TfidfVectorizer:
     with open(model_dir / "vectorizer.pkl", "rb") as f:
         vectorizer = pickle.load(f)
     print(f"Loaded vectorizer from {model_dir / 'vectorizer.pkl'}")
     return vectorizer
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="TF-IDF baseline retrieval")
     parser.add_argument("--queries", default=DEFAULT_QUERIES)
     parser.add_argument("--corpus", default=DEFAULT_CORPUS)
