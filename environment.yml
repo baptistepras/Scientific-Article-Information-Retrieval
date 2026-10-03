@@ -1,0 +1,22 @@
+# Environment for scientific citation retrieval.
+# Everything except rank_bm25 comes from conda-forge, so the same file works
+# on macOS arm64 (MPS) and on a Linux CUDA machine.
+name: citation-ir
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pytorch>=2.3
+  - transformers           # cross-encoder and LLM reranker
+  - sentence-transformers  # dense encoders
+  - xgboost                # learning to rank
+  - scikit-learn           # TF-IDF, GroupKFold
+  - nltk                   # stopwords
+  - numpy
+  - pandas
+  - pyarrow                # parquet data
+  - tqdm
+  - pip
+  - pip:
+      - rank_bm25          # BM25Okapi
+      # - openai           # only for 10_rerank_llm.py --backend openai

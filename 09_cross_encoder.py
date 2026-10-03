@@ -1,7 +1,7 @@
 """
 Enhanced cross-encoder reranking with citation-context enriched queries.
 
-Improvements over script 17:
+Improvements over a first cross-encoder version:
   - Query text enriched with citation-context sentences from full_text
   - max_length=1024 (vs 512) — more text for the cross-encoder to discriminate
   - Reranks top-200 candidates (vs 100) to avoid recall loss
@@ -17,9 +17,9 @@ Pipeline:
   6. Grid search gamma on training set.
 
 Usage:
-  python3 23_crossencoder_v2.py                          # grid search gamma
-  python3 23_crossencoder_v2.py --gamma 0.60             # single config
-  python3 23_crossencoder_v2.py --submit-held-out --gamma 0.60
+  python3 09_cross_encoder.py                          # grid search gamma
+  python3 09_cross_encoder.py --gamma 0.60             # single config
+  python3 09_cross_encoder.py --submit-held-out --gamma 0.60
 """
 
 import argparse
@@ -45,7 +45,7 @@ DEFAULT_BATCH_SIZE = 64
 DEFAULT_BATCH_SIZE_CE = 32
 DEFAULT_RERANK_TOP = 100
 
-# Base fusion weights (from script 15)
+# Base fusion weights (from 06_multi_fusion.py)
 FUSION_MODELS = {
     "uae": {
         "safe_name": "WhereIsAI_UAE-Large-V1",
@@ -68,7 +68,7 @@ FUSION_MODELS = {
 }
 TFIDF_WEIGHT = 0.20
 
-# ── Citation context extraction (same as script 21) ───────────────────────
+# ── Citation context extraction (same as 07_citation_context.py) ───────────────────────
 
 CITE_PATTERNS = [
     re.compile(r'\[[\d,;\s\-]+\]'),
@@ -383,7 +383,7 @@ def main():
     save_submission(best_preds, args.output)
 
     print(f"\nCommand for held-out submission:")
-    print(f"python3 23_crossencoder_v2.py --submit-held-out --gamma {best_gamma}")
+    print(f"python3 09_cross_encoder.py --submit-held-out --gamma {best_gamma}")
 
 
 if __name__ == "__main__":

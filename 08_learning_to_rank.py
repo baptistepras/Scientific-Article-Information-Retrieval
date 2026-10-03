@@ -15,9 +15,9 @@ Training: 5-fold GroupKFold (group = query_id) to avoid overfitting on 100 queri
 Model: XGBRanker with objective='rank:ndcg', shallow trees (max_depth=4).
 
 Usage:
-  python3 22_learning_to_rank.py                    # CV evaluation
-  python3 22_learning_to_rank.py --retrain           # force recompute features
-  python3 22_learning_to_rank.py --submit-held-out   # generate submission
+  python3 08_learning_to_rank.py                    # CV evaluation
+  python3 08_learning_to_rank.py --retrain           # force recompute features
+  python3 08_learning_to_rank.py --submit-held-out   # generate submission
 """
 
 import argparse
@@ -197,12 +197,12 @@ def load_bm25_fulltext_scores(is_heldout):
     if cite_path.exists():
         cite_scores = np.load(cite_path).astype(np.float32)
     else:
-        print("    [SKIP] Citation-context BM25: run script 21 first")
+        print("    [SKIP] Citation-context BM25: run 07_citation_context.py first")
 
     if ta_ft_path.exists():
         ta_ft_scores = np.load(ta_ft_path).astype(np.float32)
     else:
-        print("    [SKIP] TA full-text BM25: run script 21 first")
+        print("    [SKIP] TA full-text BM25: run 07_citation_context.py first")
 
     return cite_scores, ta_ft_scores
 
@@ -568,7 +568,7 @@ def main():
             print(f"  {feature_names[i]:<25s} {importance[i]:.4f}")
 
     print(f"\nCommand for held-out submission:")
-    print(f"python3 22_learning_to_rank.py --submit-held-out")
+    print(f"python3 08_learning_to_rank.py --submit-held-out")
 
 
 if __name__ == "__main__":

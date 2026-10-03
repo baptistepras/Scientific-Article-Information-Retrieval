@@ -11,9 +11,9 @@ Without --submit-held-out, runs a grid search over alpha on training queries
 and prints the best value. BGE query embeddings are cached for reuse.
 
 Usage:
-  python3 10_score_fusion.py                    # grid search + eval
-  python3 10_score_fusion.py --alpha 0.85       # fixed alpha + eval
-  python3 10_score_fusion.py --submit-held-out --alpha 0.85
+  python3 05_score_fusion.py                    # grid search + eval
+  python3 05_score_fusion.py --alpha 0.85       # fixed alpha + eval
+  python3 05_score_fusion.py --submit-held-out --alpha 0.85
 """
 
 import argparse
@@ -263,7 +263,7 @@ def main():
 
     print(f"\nBest alpha={best_alpha} → MAP={best_map:.4f}")
     print(f"\nTo submit held-out:")
-    print(f"  python3 10_score_fusion.py --submit-held-out --alpha {best_alpha}")
+    print(f"  python3 05_score_fusion.py --submit-held-out --alpha {best_alpha}")
 
     # Full eval with best alpha
     print("\nFull evaluation with best alpha:")

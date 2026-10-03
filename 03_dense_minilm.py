@@ -4,8 +4,8 @@ Embeddings are already L2-normalised, so cosine similarity = dot product.
 No training needed — just load and retrieve.
 
 Usage:
-  python3 02_dense_baseline.py
-  python3 02_dense_baseline.py --submit-held-out
+  python3 03_dense_minilm.py
+  python3 03_dense_minilm.py --submit-held-out
 """
 
 import argparse

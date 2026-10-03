@@ -14,9 +14,9 @@ Pipeline:
   5. Fuse these 2 new signals with the existing 0.57 base via grid search.
 
 Usage:
-  python3 21_cite_context_bm25.py                        # grid search
-  python3 21_cite_context_bm25.py --retrain               # rebuild BM25 index
-  python3 21_cite_context_bm25.py --submit-held-out --alpha-cite 0.10 --alpha-ft 0.10
+  python3 07_citation_context.py                        # grid search
+  python3 07_citation_context.py --retrain               # rebuild BM25 index
+  python3 07_citation_context.py --submit-held-out --alpha-cite 0.10 --alpha-ft 0.10
 """
 
 import argparse
@@ -437,7 +437,7 @@ def main():
     save_submission(best_preds, args.output)
 
     print(f"\nCommand for held-out submission:")
-    print(f"python3 21_cite_context_bm25.py --submit-held-out "
+    print(f"python3 07_citation_context.py --submit-held-out "
           f"--alpha-cite {best_ac} --alpha-ft {best_af}")
 
 

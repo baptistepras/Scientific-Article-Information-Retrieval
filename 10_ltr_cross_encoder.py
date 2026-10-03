@@ -1,7 +1,7 @@
 """
 LTR + Cross-Encoder features.
 
-Extends script 22 by adding cross-encoder scores (from script 23's cached data)
+Extends 08_learning_to_rank.py with cross-encoder scores (from the cache of 09_cross_encoder.py)
 as features in the XGBRanker. The CE captures token-level query-doc interaction
 that bi-encoder cosine similarity misses.
 
@@ -11,9 +11,9 @@ New features (3):
   - ce_rank: reciprocal rank among CE-scored candidates (0 if not scored)
 
 Usage:
-  python3 24_ltr_ce_features.py                    # CV evaluation
-  python3 24_ltr_ce_features.py --retrain           # force recompute features
-  python3 24_ltr_ce_features.py --submit-held-out   # generate submission
+  python3 10_ltr_cross_encoder.py                    # CV evaluation
+  python3 10_ltr_cross_encoder.py --retrain           # force recompute features
+  python3 10_ltr_cross_encoder.py --submit-held-out   # generate submission
 """
 
 import argparse
@@ -190,12 +190,12 @@ def load_bm25_fulltext_scores(is_heldout):
     if cite_path.exists():
         cite_scores = np.load(cite_path).astype(np.float32)
     else:
-        print("    [SKIP] Citation-context BM25: run script 21 first")
+        print("    [SKIP] Citation-context BM25: run 07_citation_context.py first")
 
     if ta_ft_path.exists():
         ta_ft_scores = np.load(ta_ft_path).astype(np.float32)
     else:
-        print("    [SKIP] TA full-text BM25: run script 21 first")
+        print("    [SKIP] TA full-text BM25: run 07_citation_context.py first")
 
     return cite_scores, ta_ft_scores
 
@@ -206,7 +206,7 @@ def load_ce_data(ce_dir: Path, is_heldout: bool):
     ce_data_path = ce_dir / f"ce_data{suffix}.npz"
 
     if not ce_data_path.exists():
-        print(f"    [SKIP] Cross-encoder scores: run script 23 first")
+        print(f"    [SKIP] Cross-encoder scores: run 09_cross_encoder.py first")
         return None, None
 
     ce_data = np.load(ce_data_path)
@@ -590,7 +590,7 @@ def main():
             print(f"  {feature_names[i]:<25s} {importance[i]:.4f}")
 
     print(f"\nCommand for held-out submission:")
-    print(f"python3 24_ltr_ce_features.py --submit-held-out")
+    print(f"python3 10_ltr_cross_encoder.py --submit-held-out")
 
 
 if __name__ == "__main__":

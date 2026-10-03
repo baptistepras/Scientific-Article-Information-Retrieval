@@ -3,9 +3,9 @@ TF-IDF baseline retrieval on title + abstract.
 Fits a TfidfVectorizer on the corpus, then ranks docs by cosine similarity.
 
 Usage:
-  python3 01_tfidf_baseline.py
-  python3 01_tfidf_baseline.py --retrain
-  python3 01_tfidf_baseline.py --submit-held-out
+  python3 01_tfidf.py
+  python3 01_tfidf.py --retrain
+  python3 01_tfidf.py --submit-held-out
 """
 
 import argparse

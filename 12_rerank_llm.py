@@ -1,8 +1,8 @@
 """
-LLM-based reranker on top of LTR+CE predictions (script 24).
+LLM-based reranker on top of LTR+CE predictions (10_ltr_cross_encoder.py).
 
-Pointwise relevance scoring with a small instruct LLM (Qwen2.5-1.5B-Instruct
-by default, ~3GB, runs on MPS/CPU). The LLM is asked to emit a relevance
+Pointwise relevance scoring with a small instruct LLM (Qwen2.5-7B-Instruct
+by default). The LLM is asked to emit a relevance
 score 0-10 for each (query, candidate) pair. Score is extracted from the
 first numeric token of the generated answer; if parsing fails we fall back
 to the logit-based expectation over "0".."10".
@@ -10,14 +10,14 @@ to the logit-based expectation over "0".."10".
 Alternative backend: set OPENAI_API_KEY and pass --backend openai to use a
 cheap OpenAI model (default gpt-4o-mini). The prompt is identical.
 
-The reranker rescores only the top-K candidates from script 24 and keeps the
+The reranker rescores only the top-K candidates from 10_ltr_cross_encoder.py and keeps the
 tail untouched, then interpolates with the LTR rank position (gamma).
 
 Usage:
-  python3 34_rerank_llm_on_ltr.py                      # local, top-20
-  python3 34_rerank_llm_on_ltr.py --rerank-top 30
-  python3 34_rerank_llm_on_ltr.py --backend openai --llm-model gpt-4o-mini
-  python3 34_rerank_llm_on_ltr.py --submit-held-out
+  python3 12_rerank_llm.py                      # local, top-20
+  python3 12_rerank_llm.py --rerank-top 30
+  python3 12_rerank_llm.py --backend openai --llm-model gpt-4o-mini
+  python3 12_rerank_llm.py --submit-held-out
 """
 
 import argparse
@@ -205,7 +205,7 @@ def main():
     pred_path = Path(args.predictions)
     if not pred_path.exists():
         print(f"ERROR: LTR predictions not found at {pred_path}")
-        print("Run script 24 first (with --submit-held-out if needed).")
+        print("Run 10_ltr_cross_encoder.py first (with --submit-held-out if needed).")
         return
     with open(pred_path) as f:
         ltr_preds = json.load(f)

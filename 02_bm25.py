@@ -3,9 +3,9 @@ BM25 retrieval on title + abstract using rank_bm25 (BM25Okapi).
 BM25 typically outperforms TF-IDF for IR tasks.
 
 Usage:
-  python3 03_sparse_improved.py
-  python3 03_sparse_improved.py --retrain
-  python3 03_sparse_improved.py --submit-held-out
+  python3 02_bm25.py
+  python3 02_bm25.py --retrain
+  python3 02_bm25.py --submit-held-out
 """
 
 import argparse

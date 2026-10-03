@@ -6,9 +6,9 @@ strong cross-encoder (BGE-reranker-v2-m3 by default). Final score is an
 interpolation between the reranker score and the LTR rank position.
 
 Usage:
-  python3 33_rerank_ce_on_ltr.py
-  python3 33_rerank_ce_on_ltr.py --rerank-top 50 --gamma 0.7
-  python3 33_rerank_ce_on_ltr.py --submit-held-out
+  python3 11_rerank_cross_encoder.py
+  python3 11_rerank_cross_encoder.py --rerank-top 50 --gamma 0.7
+  python3 11_rerank_cross_encoder.py --submit-held-out
 """
 
 import argparse
@@ -66,7 +66,7 @@ def main():
     parser.add_argument("--qrels", default=DEFAULT_QRELS)
     parser.add_argument("--held-out", default=DEFAULT_HELD_OUT)
     parser.add_argument("--predictions", default=DEFAULT_LTR_SUB, type=Path,
-                        help="Path to script 24's submission_data.json")
+                        help="Path to the submission_data.json of 10_ltr_cross_encoder.py")
     parser.add_argument("--output", default=DEFAULT_OUTPUT, type=Path)
     parser.add_argument("--ce-model", default=DEFAULT_CE_MODEL)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
@@ -87,7 +87,7 @@ def main():
     pred_path = Path(args.predictions)
     if not pred_path.exists():
         print(f"ERROR: LTR predictions not found at {pred_path}")
-        print("Run script 24 first (with --submit-held-out if needed).")
+        print("Run 10_ltr_cross_encoder.py first (with --submit-held-out if needed).")
         return
     with open(pred_path) as f:
         ltr_preds = json.load(f)
